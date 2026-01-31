@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>全能行情看板</title>
+    <!-- 引入图表库 -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <style>
+        /* --- 核心样式 --- */
+        :root { --bg: #1e1e1e; --card: #2d2d2d; --text: #e0e0e0; --red: #ff4d4d; --green: #00e676; --blue: #2979ff; }
+        body { margin: 0; padding: 0; font-family: -apple-system, sans-serif; background: var(--bg); color: var(--text); padding-bottom: 100px; -webkit-tap-highlight-color: transparent; }
+        
+        /* 顶部总览 */
+        .header { background: linear-gradient(180deg, #141414, #1e1e1e); padding: 20px; border-bottom: 1px solid #333; }
+        .total-box { text-align: center; }
+        .total-lbl { font-size: 12px; color: #888; margin-bottom: 5px; }
+        .total-val { font-size: 32px; font-weight: bold; letter-spacing: 1px; }
+        .summary-row { display: flex; margin-top: 15px; justify-content: space-around; }
+        .s-item { text-align: center; }
+        .s-val { font-size: 16px; font-weight: bold; }
+
+        /* 列表 */
+        .container { padding: 15px; max-width: 640px; margin: 0 auto; }
+        .card { background: var(--card); border-radius: 12px; padding: 15px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 6px rgba(0,0,0,0.3); position: relative; overflow: hidden; }
+        
+        /* 左侧：名称代码 */
+        .c-left { display: flex; flex-direction: column; }
+        .name { font-size: 16px; font-weight: 600; margin-bottom: 4px; color: #fff; }
+        .code { font-size: 12px; color: #666; background: #1a1a1a; padding: 2px 6px; border-radius: 4px; align-self: flex-start; }
+        
+        /* 中间：持仓收益 */
+        .c-mid { text-align: center; flex: 1; display: flex; flex-direction: column; }
+        .profit-lbl { font-size: 10px; color: #888; }
+        .profit-val { font-size: 14px; font-weight: bold; }
+
+        /* 右侧：价格涨幅 */
+        .c-right { text-align: right; }
+        .price { font-size: 18px; font-weight: bold; }
+        .percent { font-size: 12px; padding: 2px 6px; border-radius: 4px; color: #fff; display: inline-block; margin-top: 4px; }
+
+        /* 颜色类 */
+        .up { color: var(--red); }
+        .down { color: var(--green); }
+        .bg-up { background: rgba(255, 77, 77, 0.2); }
+        .bg-down { background: rgba(0, 230, 118, 0.2); }
+        
+        /* 按钮 */
+        .fab { position: fixed; bottom: 30px; right: 30px; width: 50px; height: 50px; background: var(--blue); border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; font-size: 28px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); cursor: pointer; z-index: 99; }
+        .fab-refresh { position: fixed; bottom: 30px; left: 30px; width: 40px; height: 40px; background: #333; border-radius: 50%; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 18px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); cursor: pointer; z-index: 99; transition: 0.5s; }
+
+        /* 弹窗 */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 100; align-items: center; justify-content: center; backdrop-filter: blur(5px); }
+        .modal-content { background: #2d2d2d; padding: 20px; border-radius: 15px; width: 85%; max-width: 320px; color: #fff; }
+        .input-group { margin-bottom: 15px; }
+        .input-group label { display: block; font-size: 12px; color: #888; margin-bottom: 5px; }
+        .input-group input { width: 100%; padding: 10px; background: #1a1a1a; border: 1px solid #444; color: #fff; border-radius: 6px; box-sizing: border-box; }
+        .tips { font-size: 11px; color: #666; margin-bottom: 15px; line-height: 1.5; }
+        
+        .btn-row { display: flex; gap: 10px; }
+        .btn { flex: 1; padding: 10px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; }
+        .btn-save { background: var(--blue); color: white; }
+        .btn-cancel { background: #444; color: #ccc; }
+        .btn-del { background: #3e2020; color: var(--red); flex: 0.3; }
+
+        /* K线图弹窗 */
+        .chart-modal { width: 95%; max-width: 500px; height: 350px; }
+        #kline { width: 100%; height: 300px; }
+
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <div class="total-box">
+        <div class="total-lbl">总持仓市值</div>
+        <div class="total-val" id="t-asset">0.00</div>
+    </div>
+    <div class="summary-row">
+        <div class="s-item">
+            <div class="total-lbl">总盈亏</div>
+            <div class="s-val" id="t-profit">0.00</div>
+        </div>
+        <div class="s-item">
+            <div class="total-lbl">今日变动</div>
+            <div class="s-val" id="t-day">0.00</div>
+        </div>
+    </div>
+</div>
+
+<div class="container" id="list"></div>
+
+<div class="fab-refresh" onclick="refresh()">🔄</div>
+<div class="fab" onclick="edit(-1)">+</div>
+
+<!-- 编辑弹窗 -->
+<div class="modal" id="editModal">
+    <div class="modal-content">
+        <h3 style="margin-top:0">添加/修改</h3>
+        
+        <div class="input-group">
+            <label>代码 (前缀: sh/sz/hk/us)</label>
+            <input type="text" id="in-code" placeholder="例: sh510300, sz000858">
+        </div>
+        <div class="tips">
+            <b>💡 代码规则：</b><br>
+            上海股票/ETF/LOF → <b>sh</b> (如 sh600519, sh510300)<br>
+            深圳股票/ETF → <b>sz</b> (如 sz000858, sz159915)<br>
+            港股 → <b>hk</b> (如 hk00700)<br>
+            美股 → <b>us</b> (如 usAAPL)
+        </div>
+
+        <div class="input-group">
+            <label>持有股数</label>
+            <input type="number" id="in-share" placeholder="0">
+        </div>
+        <div class="input-group">
+            <label>成本单价 (元)</label>
+            <input type="number" id="in-cost" placeholder="买入时的单价">
+        </div>
+
+        <div class="btn-row">
+            <button class="btn btn-del" id="btn-del" onclick="del()" style="display:none">删</button>
+            <button class="btn btn-cancel" onclick="closeModal()">取消</button>
+            <button class="btn btn-save" onclick="save()">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- 分时图弹窗 -->
+<div class="modal" id="chartModal">
+    <div class="modal-content chart-modal">
+        <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+            <span id="chart-name" style="font-weight:bold"></span>
+            <span onclick="document.getElementById('chartModal').style.display='none'" style="cursor:pointer">✕</span>
+        </div>
+        <div id="kline"></div>
+        <div style="text-align:center; font-size:10px; color:#666">腾讯财经接口 · 实时分时</div>
+    </div>
+</div>
+
+<script>
+    // 核心数据
+    let stocks = JSON.parse(localStorage.getItem('myStocks')) || [];
+    let marketData = {};
+    let editIdx = -1;
+    let chartInstance = null;
+
+    // 1. 获取腾讯财经实时行情 (支持多只一起查)
+    function refresh() {
+        if(stocks.length === 0) return;
+        
+        // 旋转图标
+        const btn = document.querySelector('.fab-refresh');
+        btn.style.transform = 'rotate(360deg)';
+        setTimeout(()=> btn.style.transform='rotate(0deg)', 500);
+
+        // 拼接代码
+        const codes = stocks.map(s => s.code).join(',');
+        
+        const script = document.createElement('script');
+        // 腾讯接口: qt.gtimg.cn
+        script.src = `https://qt.gtimg.cn/q=${codes}&t=${Date.now()}`;
+        
+        // 腾讯接口返回的是 var v_sh600519="..."; 这种格式
+        // 我们利用回调处理
+        script.onload = () => {
+            stocks.forEach(s => {
+                // 变量名规则: v_代码
+                const varName = 'v_' + s.code; 
+                if(window[varName]) {
+                    // 解析数据: "1:名称~2:代码~3:当前价~4:昨收~5:开盘..."
+                    const arr = window[varName].split('~');
+                    marketData[s.code] = {
+                        name: arr[1],
+                        price: parseFloat(arr[3]),
+                        prevClose: parseFloat(arr[4]),
+                        pct: parseFloat(arr[32]), // 涨跌幅%
+                        time: arr[30]
+                    };
+                }
+            });
+            render();
+            // 清理全局变量，防止内存泄漏
+            stocks.forEach(s => { try{ delete window['v_'+s.code]; }catch(e){} });
+        };
+        document.body.appendChild(script);
+        setTimeout(() => script.remove(), 2000); // 清理DOM
+    }
+
+    // 2. 渲染列表
+    function render() {
+        const list = document.getElementById('list');
+        list.innerHTML = '';
+        
+        let tAsset = 0, tProfit = 0, tDay = 0;
+
+        stocks.forEach((s, idx) => {
+            const m = marketData[s.code];
+            if(!m) return; // 数据还没回来
+
+            const curVal = m.price * s.share;
+            const costVal = s.cost * s.share;
+            const profit = curVal - costVal; // 总盈亏
+            // 今日变动 = (当前价 - 昨收) * 股数
+            const dayChange = (m.price - m.prevClose) * s.share;
+
+            tAsset += curVal;
+            tProfit += profit;
+            tDay += dayChange;
+
+            const isUp = m.pct >= 0;
+            const color = isUp ? 'up' : 'down';
+            const bg = isUp ? 'bg-up' : 'bg-down';
+            const sign = isUp ? '+' : '';
+
+            list.innerHTML += `
+                <div class="card" onclick="showChart('${s.code}', '${m.name}', ${idx})">
+                    <div class="c-left">
+                        <div class="name">${m.name}</div>
+                        <div class="code">${s.code}</div>
+                    </div>
+                    <div class="c-mid">
+                        <span class="profit-val ${profit>=0?'up':'down'}">${profit>0?'+':''}${profit.toFixed(0)}</span>
+                        <span class="profit-lbl">持仓盈亏</span>
+                    </div>
+                    <div class="c-right">
+                        <div class="price ${color}">${m.price.toFixed(m.price<10?3:2)}</div>
+                        <div class="percent ${bg} ${color}">${sign}${m.pct}%</div>
+                    </div>
+                </div>
+            `;
+        });
+
+        // 更新顶部
+        document.getElementById('t-asset').innerText = tAsset.toLocaleString('zh-CN', {minimumFractionDigits:2});
+        updateHead('t-profit', tProfit);
+        updateHead('t-day', tDay);
+    }
+
+    function updateHead(id, val) {
+        const el = document.getElementById(id);
+        el.innerText = (val>0?'+':'') + val.toLocaleString('zh-CN', {minimumFractionDigits:2});
+        el.className = 's-val ' + (val>=0?'up':'down');
+    }
+
+    // 3. 编辑功能
+    function edit(idx) {
+        // 如果是点击卡片进入图表，长按或者点按钮才是编辑？
+        // 这里简化：只有点+号才是新增。
+        // 为了支持编辑，我们在图表页加个编辑入口，或者点+号时判断
+        editIdx = idx;
+        const modal = document.getElementById('editModal');
+        const delBtn = document.getElementById('btn-del');
+
+        if(idx === -1) {
+            document.getElementById('in-code').value = '';
+            document.getElementById('in-share').value = '';
+            document.getElementById('in-cost').value = '';
+            document.getElementById('in-code').disabled = false;
+            delBtn.style.display = 'none';
+        } else {
+            // 编辑逻辑，这里暂时只做新增演示，若要编辑需修改UI交互
+        }
+        modal.style.display = 'flex';
+    }
+
+    function save() {
+        const code = document.getElementById('in-code').value.trim();
+        const share = parseFloat(document.getElementById('in-share').value);
+        const cost = parseFloat(document.getElementById('in-cost').value);
+        
+        if(!code || isNaN(share) || isNaN(cost)) return alert('请填全信息');
+        
+        // 简单的重复检查
+        if(editIdx === -1) {
+            stocks.push({code, share, cost});
+        }
+        localStorage.setItem('myStocks', JSON.stringify(stocks));
+        closeModal();
+        refresh();
+    }
+
+    function closeModal() { document.getElementById('editModal').style.display = 'none'; }
+    function del() {} // 简化版
+
+    // 4. 显示分时图 (调用新浪财经图片接口，最简单粗暴)
+    function showChart(code, name, idx) {
+        // 这里如果是为了编辑，可以在弹窗里加个按钮。
+        // 为了方便，这里直接弹图表
+        const modal = document.getElementById('chartModal');
+        modal.style.display = 'flex';
+        document.getElementById('chart-name').innerText = name + ' (' + code + ')';
+        
+        const container = document.getElementById('kline');
+        container.innerHTML = ''; // 清空
+
+        // 判断市场类型
+        let imgUrl = '';
+        if(code.startsWith('sh') || code.startsWith('sz')) {
+            // A股/ETF分时图
+            const symbol = code; 
+            imgUrl = `https://image.sinajs.cn/newchart/min/n/${symbol}.gif?t=${Date.now()}`;
+        } else if(code.startsWith('hk')) {
+            // 港股
+            imgUrl = `https://image.sinajs.cn/newchart/hk_stock/min/${code.substring(2)}.gif`;
+        } else if(code.startsWith('us')) {
+            // 美股
+            imgUrl = `https://image.sinajs.cn/newchart/usstock/min/${code.substring(2)}.gif`;
+        }
+
+        // 创建图片
+        const img = new Image();
+        img.src = imgUrl;
+        img.style.width = '100%';
+        img.style.borderRadius = '8px';
+        container.appendChild(img);
+        
+        // 添加长按删除/编辑的提示或按钮（简化版省略）
+        const editBtn = document.createElement('div');
+        editBtn.innerText = "🗑 删除 / ✏️ 修改";
+        editBtn.style.textAlign = 'center';
+        editBtn.style.padding = '10px';
+        editBtn.style.color = '#888';
+        editBtn.style.cursor = 'pointer';
+        editBtn.onclick = () => {
+             if(confirm('删除这个持仓吗？')) {
+                 stocks.splice(idx, 1);
+                 localStorage.setItem('myStocks', JSON.stringify(stocks));
+                 modal.style.display = 'none';
+                 refresh();
+             }
+        };
+        container.appendChild(editBtn);
+    }
+
+    // 自动刷新
+    refresh();
+    setInterval(refresh, 5000); // 股票波动快，5秒刷一次
+
+</script>
+</body>
+</html>
